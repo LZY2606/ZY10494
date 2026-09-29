@@ -24,6 +24,7 @@ data class Configuration(
 
 @Suppress("ConstructorParameterNaming")
 data class Expectation(
+    val build_fails: Boolean = false,
     val file_exists: List<ExistingFile> = emptyList(),
     val success: List<String> = emptyList(),
     val failure: List<String> = emptyList(),

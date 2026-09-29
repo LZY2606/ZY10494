@@ -1,0 +1,19 @@
+tests:
+  - description: "Reversible installs: install, user edits, upgrade, conflicts, recovery, and uninstall"
+    configuration:
+      tasks: tasks
+    expectation:
+      success:
+        - tasks
+      output_contains:
+        - "DRY-RUN"
+      file_exists:
+        - name: .git/hooks/pre-commit
+          content: |
+            #!/bin/sh
+            # hand-written user header, must survive upgrades and uninstall
+        - name: .git/hooks/commit-msg
+          findRegex: .*managed block \(do not edit between the markers\).*$
+          permissions: X
+        - name: .git/hooks/.gradle-git-hooks-manifest.properties
+          findRegex: hook\.commit-msg\.digest=sha256:[0-9a-f]{64}

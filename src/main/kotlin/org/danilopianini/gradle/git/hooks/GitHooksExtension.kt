@@ -15,6 +15,21 @@ open class GitHooksExtension(repoRoot: File) : Serializable {
     constructor(settings: Settings) : this(settings.rootDir)
 
     /**
+     * Enables reversible, manifest-tracked hook installation.
+     *
+     * When enabled, [createHooks] installs every generated script as a *managed segment* delimited by
+     * marker lines, instead of owning the whole hook file. Content written by users or other tools
+     * outside the managed markers is preserved byte-exactly, installations can be previewed with
+     * `createHooks(dryRun = true)`, and [removeHooks] uninstalls only the segments managed by this plugin.
+     * Every installation is recorded in a versioned manifest stored next to the hooks
+     * (see `docs/reversible-hook-installation.md`).
+     *
+     * Disabled by default: when `false`, [createHooks] keeps its legacy whole-file behavior,
+     * with unchanged output, errors, and performance characteristics.
+     */
+    var reversibleInstalls: Boolean = false
+
+    /**
      * The git repository root. If unset, it will be searched recursively from the project root towards the
      * filesystem root.
      */
@@ -68,8 +83,12 @@ open class GitHooksExtension(repoRoot: File) : Serializable {
     /**
      * To be called to force the hook creation in case of necessity.
      * If passed `true`, overwrites in case the script is already present and different than expected.
+     *
+     * When [reversibleInstalls] is enabled, [overwriteExisting] is ignored (managed segments are always
+     * upgraded in place, and user content is never overwritten) and [dryRun] can be used to only
+     * report what would be done, without writing any file.
      */
-    fun createHooks(overwriteExisting: Boolean = false) {
+    fun createHooks(overwriteExisting: Boolean = false, dryRun: Boolean = false) {
         if (gitDir.isFile && "gitdir:" in gitDir.readText()) {
             // gets a logger from the settings object
             Logging.getLogger(GitHooksExtension::class.java).warn(
@@ -80,9 +99,56 @@ open class GitHooksExtension(repoRoot: File) : Serializable {
                 |https://github.com/DanySK/gradle-pre-commit-git-hooks/issues/396
                 """.trimMargin().replace(Regex("\\R"), "\n"),
             )
+        } else if (reversibleInstalls) {
+            ManagedHookInstaller(resolveHooksDir()).install(hooks, dryRun)
         } else {
+            require(!dryRun) {
+                "createHooks(dryRun = true) requires reversibleInstalls = true: " +
+                    "the legacy whole-file installation has no dry-run support"
+            }
             actuallyCreateHooks(overwriteExisting)
         }
+    }
+
+    /**
+     * Removes only the hook segments managed by this plugin, restoring any pre-existing user content
+     * byte-exactly. Requires [reversibleInstalls] to be enabled.
+     * With [dryRun], only reports what would be done, without writing any file.
+     */
+    fun removeHooks(dryRun: Boolean = false) {
+        check(reversibleInstalls) {
+            "removeHooks() requires reversibleInstalls = true: " +
+                "only manifest-tracked, managed segments can be removed safely"
+        }
+        ManagedHookInstaller(resolveHooksDir()).remove(hookNames = null, dryRun = dryRun)
+    }
+
+    private fun resolveHooksDir(): File {
+        val configured = coreHooksPath()
+        return when {
+            configured.isNullOrBlank() -> File(gitDir, "hooks")
+            else -> File(configured).takeIf { it.isAbsolute } ?: File(repoRoot, configured)
+        }
+    }
+
+    private fun coreHooksPath(): String? {
+        val config = File(gitDir, "config")
+        if (!config.isFile) {
+            return null
+        }
+        var inCoreSection = false
+        config.readLines(Charsets.UTF_8).forEach { line ->
+            val trimmed = line.trim()
+            when {
+                trimmed.startsWith("[") ->
+                    inCoreSection = trimmed.removePrefix("[").substringBefore("]").trim().equals("core", true)
+                inCoreSection && "=" in trimmed &&
+                    trimmed.substringBefore("=").trim().equals("hooksPath", ignoreCase = true) ->
+                    return trimmed.substringAfter("=").trim()
+                else -> Unit
+            }
+        }
+        return null
     }
 
     private fun actuallyCreateHooks(overwriteExisting: Boolean) {

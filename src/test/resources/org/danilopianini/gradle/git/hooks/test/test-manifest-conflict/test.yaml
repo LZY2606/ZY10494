@@ -1,0 +1,9 @@
+tests:
+  - description: "A tampered managed block must fail the build with a conflict, not get overwritten"
+    configuration:
+      tasks: tasks
+    expectation:
+      build_fails: true
+      output_contains:
+        - "MANAGED HOOK CONFLICT"
+        - "commit-msg"

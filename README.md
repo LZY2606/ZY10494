@@ -194,3 +194,29 @@ gitHooks {
     createHooks(true)
 }
 ```
+
+### Reversible installs (managed segments)
+
+By default, the plugin owns the whole hook file.
+If you maintain hand-written hooks alongside the generated ones,
+enable reversible installs to let the plugin own only a *managed segment* of each hook file,
+delimited by marker lines.
+Your content outside the markers is preserved byte-exactly,
+installations are recorded in a versioned manifest next to the hooks,
+and the plugin can uninstall only its own segments:
+
+```kotlin
+gitHooks {
+    reversibleInstalls = true
+    preCommit { tasks("ktlintCheck") }
+    createHooks() // install or upgrade the managed segments
+    // createHooks(dryRun = true) // preview the changes without writing anything
+    // removeHooks() // remove only the segments managed by this plugin
+}
+```
+
+If a managed segment is edited manually, the next build fails with a conflict
+instead of overwriting it.
+The design, the ownership model, the conflict-recovery strategies,
+and the manifest location are documented in
+[docs/reversible-hook-installation.md](docs/reversible-hook-installation.md).
